@@ -46,14 +46,30 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+Jazzalyn Zou jjz437
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+The data set being used is the combined data set used from project 1 which combines data sets "Body" and "Workout". This combined data set includes information downloaded from my apple watch that has information on my heart rates, stand times, basal energy burned, total energy burned, types of exercises etc. This data set is interesting to me because I enjoy working out and being active and I wear my watch pretty frequently when I do so. I believe this data set will allow me to gain insight into my workouts which is extremely interesting to me. There are 19 variables being measured and 15 observations. This is less than usual because the NAs were removed during this in order for some of the analysis in this project to work. My binary variable measures whether or not I completed my workout goal of burning 200 calories in one workout. For my categorical variables, there is "Type" which represents the types of workouts I do and includes 9 different groups. For the next categorical variable, there is "Active Energy Scale" which ranks my workout intensity on a scale of medium and low based on the active energy used in each workout. 
+
 
 ```{R}
 library(tidyverse)
+Body <- read_csv("Body.csv")
+Workout <- read_csv("Workout.csv")
+
+Workout %>% rename("Date" = Start) %>% select(-End) %>% mutate_at(c("Date"), as.character) %>% mutate_at("Date", str_replace," \\d\\d:\\d\\d:\\d\\d", "") ->Workout
+Body %>% mutate_at(c("Date"), as.character) -> Body
+full_join(Body, Workout, by = "Date") -> Combined
+Combined %>% select(-Step_Cadence, -Swimming_Stroke_Count, -Swim_Stoke_Cadence, -Flights_Climbed, -Elevation_Ascended, -Elevation_Descended) -> Combined 
+
+Combined %>% group_by(Active_Energy) %>% mutate(Workout_Goal = ifelse(Active_Energy>200, "1", ifelse(Active_Energy<200,"0"))) -> Combined
+
+Combined %>% group_by(Type) %>% summarize(n=n())
+
+Combined <- Combined %>% group_by(Active_Energy) %>% mutate(Active_Energy_Scale = ifelse(Active_Energy>200, "high", ifelse(Active_Energy<=200, "low")))
+
+Combined %>% drop_na() -> Combined
 # read your datasets in here, e.g., with read_csv()
 
 # if your dataset needs tidying, do so here
@@ -65,74 +81,189 @@ library(tidyverse)
 
 ```{R}
 library(cluster)
-# clustering code here
+
+clust_dat<- Combined %>% select(Total_Energy, Avg_Heart_Rate, Basal_Energy_Burned)
+
+sil_width <- vector()
+for (i in 2:10){
+  kms <- kmeans(clust_dat, centers = i)
+  sil <- silhouette(kms$cluster, dist(clust_dat))
+  sil_width[i] <- mean(sil[,3])
+}
+ggplot() + geom_line(aes(x=1:10,y=sil_width)) + scale_x_continuous(name="k", breaks = 1:10)
+
+pam1<-clust_dat%>%pam(k=2)
+pam1
+
+pam1$silinfo$avg.width
+
+library(GGally)
+clust_dat <- clust_dat %>% ungroup %>% mutate(cluster = as.factor(pam1$clustering))
+
+ggpairs(clust_dat, aes(color=cluster))
+
+
 ```
 
-Discussion of clustering here
+The variables chosen to be examined was Active Energy, Total Energy, Average Heart Rate, and Basal Energy Burned. Using largest average silhouette length, the number of clusters chosen was 2. Looking at the two clusters, the red cluster has high active energy, high total energy and high average heart rate while blue is low on these variables. This suggests that the red cluster represents my higher intensity workouts and blue represents my low intensity workouts.There is very little overlap between the two colors. Red and blue have more overlap on basal energy burned which makes sense since this is the energy I burn on a daily basis which should be relatively consistent. Looking at the average silhouette width, we have an average of 0.57 which means a reasonable structure has been found. 
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+PCAdata <- Combined %>% select(Heart_Rate_Avg, Active_Energy, Max_Heart_Rate, Heart_Rate_Min, Stand_Time)
+
+princomp(PCAdata,cor= T) -> pca1
+scaledability <- data.frame(scale(PCAdata))
+summary(pca1, loadings = "T")
+
+matrix <- pca1$scores
+matrix <- matrix %>% as.data.frame() %>% mutate(Active_Energy = PCAdata$Active_Energy)
+ggplot(matrix, aes(Comp.1, Comp.2)) + geom_point(aes(color =Active_Energy))
+cor(PCAdata$Active_Energy, matrix$Comp.1)
 ```
 
-Discussions of PCA here. 
+We would keep the first 3 PCs to retain an 85% variance (86.06%). PC1 is the general strength axis and is the variable that provides the highest variability (0.446) among the 5 variables. PC1 has positive values for Average Heart Rate, Active Energy, Max Heart Rate, and Heart Rate Minimum and a negative value for Stand Time which means that if one were to score high on PC1 they would score high on Average Heart Rate, Active Energy, Maximum Heart Rate, and Heart Rate Minimum but score low on Stand Time. The opposite would be true if one were to score low on PC1. PC2 has a variability of 0.224 and has positive values for Average Heart Rate and Heart Rate Minimum and negative values for Active Energy, Max Heart Rate and Stand Time. This means that if one were to score high on PC2, they would score high on Average Heart Rate and Heart Rate Minimum but low of Active Energy, Max Heart Rate and Stand Time. Specifically, they would score high on Minimum Heart Rate since it has a loading of 0.812 of PC2. Lastly, PC3 has a variability of 0.191 and positive values for Average Heart Rate, Heart Rate Minimum and Stand Time and no values for Active Energy and Max Heart Rate. This means that if someone were to score high on PC3 they would also score high on Average Heart Rate, Heart Rate Minimum and Stand Time. Specifically, high on stand time since stand time has a loading of 0.833 of PC3. Looking at the graph, it can be concluded that Active energy and Comp.1 are positively correlated so that as Active energy increases so does Comp.1. The correlation between Active Energy and PC1 is 0.922. 
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+
+Combined$Workout_Goal <- as.numeric(Combined$Workout_Goal)
+
+logistic_fit <- glm(Workout_Goal ~ Heart_Rate_Avg + Heart_Rate_Max + Heart_Rate_Min + Stand_Time+ Heart_Rate_Variability + Avg_Speed, data=Combined, family="binomial")
+
+prob_reg<-predict(logistic_fit, type = "response") 
+
+class_diag(prob_reg, Combined$Workout_Goal, positive = "1")
+
+table(truth = Combined$Workout_Goal, predictions = prob_reg>.5)
+ 
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+set.seed(322)
+k=10
+
+data<-sample_frac(Combined) 
+folds <- rep(1:k, length.out=nrow(data)) 
+
+diags<-NULL
+
+i=1
+for(i in 1:k){
+
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+truth<-test$Workout_Goal
+
+fit <- glm(Workout_Goal ~ Heart_Rate_Avg + Heart_Rate_Max + Heart_Rate_Min + Stand_Time+ Heart_Rate_Variability + Avg_Speed, data=Combined, family="binomial")
+
+probs <- predict(fit, newdata = test, type = "response")
+
+diags<-rbind(diags,class_diag(probs,truth, positive = "1")) }
+
+summarize_all(diags,mean)
+
 ```
 
-Discussion here
+The AUC for the logistic regression was 0.82 while the AUC for the 10CV was 0.4. This suggests the logistic regression is doing a better job predicting the data set while the 10CV shows signs of over fitting. 
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+
+knn_fit <- knn3(Workout_Goal ~ Heart_Rate_Avg + Heart_Rate_Max + Heart_Rate_Min + Stand_Time+ Heart_Rate_Variability + Avg_Speed, data=Combined)
+
+prob_knn <- predict(knn_fit, Combined)
+
+class_diag(prob_knn[,2], Combined$Workout_Goal, positive = "1") 
+
 ```
 
 ```{R}
-# cross-validation of np classifier here
-```
+set.seed(322)
+k=10
 
-Discussion
+data<-sample_frac(Combined) 
+folds <- rep(1:k, length.out=nrow(data)) 
+
+diags<-NULL
+
+i=1
+for(i in 1:k){
+
+train<-data[folds!=i,] 
+test<-data[folds==i,] 
+truth<-test$Workout_Goal
+
+fit <- knn3(Workout_Goal ~ Heart_Rate_Avg + Heart_Rate_Max + Heart_Rate_Min + Stand_Time+ Heart_Rate_Variability + Avg_Speed, data=Combined)
+
+probs <- predict(fit, newdata = test)[,2]
+
+diags<-rbind(diags,class_diag(probs,truth, positive = "1"))  }
+
+summarize_all(diags,mean)
+```
+Using KNN, the AUC was found to be 0.75 while the 10CV has an AUC of 0.35. This suggests the KNN did a better job and that the 10CV showed signs of over fitting since the AUC was relatively low. 
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+fit <- lm(Active_Energy~ Avg_Heart_Rate +Duration + Total_Energy + Avg_Speed + Distance + Heart_Rate_Max + Heart_Rate_Min + Active_Energy_Scale + Stand_Time + Resting_Heart_Rate +Heart_Rate_Variability + Heart_Rate_Variability + Heart_Rate_Avg, data = Combined)
+
+yhat<-predict(fit)
+cbind(yhat, y=Combined$Active_Energy)
+
+mean((Combined$Active_Energy-yhat)^2)
 ```
 
 ```{R}
-# cross-validation of regression model here
+set.seed(1234)
+k=5
+
+data<-Combined[sample(nrow(Combined)),] 
+folds<-cut(seq(1:nrow(Combined)),breaks=k,labels=F) 
+
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  
+  fit<-lm(Active_Energy ~ Avg_Heart_Rate + Duration + Total_Energy + Avg_Speed + Distance + Heart_Rate_Max + Heart_Rate_Min + Active_Energy_Scale + Stand_Time + Resting_Heart_Rate +Heart_Rate_Variability + Heart_Rate_Variability + Heart_Rate_Avg, data=train)
+
+  yhat<-predict(fit,newdata=test)
+
+  diags<-mean((test$Active_Energy-yhat)^2) 
+}
+
+mean(diags)
+
 ```
 
-Discussion
+For the linear regression an MSE of 1.99 was calculated which is pretty good and suggests our prediction error is pretty small. On the other hand, the CV has a MSE of 14,102 which is incredibly large and suggests a huge prediction error. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3")
+hi <- "Hello"
+cat(c(hi, py$hi))
 ```
 
 ```{python}
+hi = "world"
+print(r.hi, hi)
 # python code here
 ```
-
-Discussion
+In this, we are first defining hi in R as "hello". Next we defined hi in python as "world". Since they are in different environments, it doesn't override one another. When you print from r, you first grab the hi from r "hello" and then the hi from python using py$ "world" and you print "Hello World". On the otherhand, in python, we print out hi from r using r. "hello" and then hi from pythod "world" which also prints out "Hello World". So in this case, we are grabbing the same variable but in different enviornments to create the same message. 
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
-
+Nope, just that I had a great semester and I learned a lot. Have a good break! 
 
 
 
